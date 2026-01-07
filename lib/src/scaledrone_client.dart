@@ -46,7 +46,12 @@ class Scaledrone {
   final List<CallbackHandler?> _callbacks = [];
   final Map<String, Room> _roomsMap = {};
 
-  ConnectionListener? _listener;
+  // Connection callbacks
+  OnOpenCallback? _onOpen;
+  OnOpenFailureCallback? _onOpenFailure;
+  OnFailureCallback? _onFailure;
+  OnClosedCallback? _onClosed;
+
   bool _isConnected = false;
 
   // Reconnection state
@@ -54,7 +59,7 @@ class Scaledrone {
   int _reconnectAttempts = 0;
   Timer? _reconnectTimer;
   String? _lastAuthJwt;
-  Map<String, SubscribeOptions> _roomSubscriptions = {};
+  final Map<String, SubscribeOptions> _roomSubscriptions = {};
   bool _isManualClose = false;
 
   Scaledrone(
@@ -85,12 +90,20 @@ class Scaledrone {
     _url = url;
   }
 
-  void connect(ConnectionListener listener) {
+  void connect({
+    OnOpenCallback? onOpen,
+    OnOpenFailureCallback? onOpenFailure,
+    OnFailureCallback? onFailure,
+    OnClosedCallback? onClosed,
+  }) {
     if (_isConnected) {
       throw StateError('Already connected');
     }
 
-    _listener = listener;
+    _onOpen = onOpen;
+    _onOpenFailure = onOpenFailure;
+    _onFailure = onFailure;
+    _onClosed = onClosed;
     _reconnectAttempts = 0;
     _isReconnecting = false;
     _isManualClose = false;
@@ -110,13 +123,13 @@ class Scaledrone {
         'callback': _registerCallback((callback, error) {
           if (error != null) {
             _Logs.log('Connection failed: $error', name: 'Scaledrone');
-            _listener?.onOpenFailure(error);
+            _onOpenFailure?.call(error);
             _handleConnectionFailure(error);
           } else {
             _clientId = callback?.clientId;
             _reconnectAttempts = 0;
             _Logs.log('Connected successfully', name: 'Scaledrone');
-            _listener?.onOpen();
+            _onOpen?.call();
             _restoreConnectionState();
           }
         }),
@@ -135,7 +148,7 @@ class Scaledrone {
       final exception = Exception(e.toString());
       _Logs.log('Connection failed: $e', name: 'Scaledrone');
       if (!_isReconnecting) {
-        _listener?.onOpenFailure(exception);
+        _onOpenFailure?.call(exception);
       }
       _handleConnectionFailure(exception);
     }
@@ -158,8 +171,10 @@ class Scaledrone {
   }
 
   Room subscribe(
-    String roomName,
-    RoomListener roomListener, {
+    String roomName, {
+    OnRoomOpenCallback? onOpen,
+    OnRoomOpenFailureCallback? onOpenFailure,
+    OnRoomMessageCallback? onMessage,
     SubscribeOptions? options,
   }) {
     if (!_isConnected) {
@@ -174,7 +189,14 @@ class Scaledrone {
 
     _Logs.log('Subscribing to room: $roomName', name: 'Scaledrone');
     final opts = options ?? SubscribeOptions();
-    final room = Room(roomName, roomListener, this, opts);
+    final room = Room(
+      name: roomName,
+      onOpen: onOpen,
+      onOpenFailure: onOpenFailure,
+      onMessage: onMessage,
+      scaledrone: this,
+      options: opts,
+    );
 
     // Store subscription options for reconnection
     _roomSubscriptions[roomName] = opts;
@@ -186,9 +208,9 @@ class Scaledrone {
       'callback': _registerCallback((callback, error) {
         if (error != null) {
           _Logs.log('Room subscription failed: $roomName', name: 'Scaledrone');
-          roomListener.onRoomOpenFailure(room, error);
+          onOpenFailure?.call(room, error);
         } else {
-          roomListener.onRoomOpen(room);
+          onOpen?.call(room);
         }
       }),
     };
@@ -223,7 +245,11 @@ class Scaledrone {
     _roomSubscriptions.remove(room.name);
   }
 
-  void authenticate(String jwt, AuthenticationListener listener) {
+  void authenticate(
+    String jwt, {
+    OnAuthenticationCallback? onAuthentication,
+    OnAuthenticationFailureCallback? onAuthenticationFailure,
+  }) {
     if (!_isConnected) {
       throw StateError('Not connected to Scaledrone');
     }
@@ -241,9 +267,9 @@ class Scaledrone {
       'callback': _registerCallback((callback, error) {
         if (error != null) {
           _Logs.log('Authentication failed: $error', name: 'Scaledrone');
-          listener.onAuthenticationFailure(error);
+          onAuthenticationFailure?.call(error);
         } else {
-          listener.onAuthentication();
+          onAuthentication?.call();
         }
       }),
     };
@@ -307,13 +333,13 @@ class Scaledrone {
         }
       } else if (callback.error != null) {
         _Logs.log('Server error: ${callback.error}', name: 'Scaledrone');
-        _listener?.onFailure(Exception(callback.error));
+        _onFailure?.call(Exception(callback.error));
       } else {
         _handleRoomMessage(callback);
       }
     } catch (e, _) {
       _Logs.log('Error parsing message: $e', name: 'Scaledrone');
-      _listener?.onFailure(Exception('Message parsing error: $e'));
+      _onFailure?.call(Exception('Message parsing error: $e'));
     }
   }
 
@@ -341,7 +367,7 @@ class Scaledrone {
             clientId: callback.clientId,
             member: member,
           );
-          room.listener.onRoomMessage(room, message);
+          room.onMessage?.call(room, message);
           break;
 
         case 'observable_members':
@@ -363,7 +389,7 @@ class Scaledrone {
           for (final member in membersList) {
             room.members[member.id] = member;
           }
-          room.observableListener?.onMembers(room, membersList);
+          room.onMembers?.call(room, membersList);
           break;
 
         case 'observable_member_join':
@@ -371,7 +397,7 @@ class Scaledrone {
             final memberData = callback.data as Map<String, dynamic>;
             final member = Member.fromJson(memberData);
             room.members[member.id] = member;
-            room.observableListener?.onMemberJoin(room, member);
+            room.onMemberJoin?.call(room, member);
           } catch (e) {
             _Logs.log('Error parsing member join data: $e', name: 'Scaledrone');
           }
@@ -382,7 +408,7 @@ class Scaledrone {
             final memberData = callback.data as Map<String, dynamic>;
             final member = Member.fromJson(memberData);
             room.members.remove(member.id);
-            room.observableListener?.onMemberLeave(room, member);
+            room.onMemberLeave?.call(room, member);
           } catch (e) {
             _Logs.log(
               'Error parsing member leave data: $e',
@@ -419,13 +445,13 @@ class Scaledrone {
   void _onError(dynamic error) {
     _Logs.log('WebSocket error: $error', name: 'Scaledrone');
     final exception = Exception(error.toString());
-    _listener?.onFailure(exception);
+    _onFailure?.call(exception);
     _handleConnectionFailure(exception);
   }
 
   void _onDone() {
     _isConnected = false;
-    _listener?.onClosed('Connection closed');
+    _onClosed?.call('Connection closed');
     if (!_isReconnecting && !_isManualClose) {
       _handleConnectionFailure(Exception('Connection closed'));
     }
@@ -522,9 +548,9 @@ class Scaledrone {
               'Failed to re-subscribe to room $roomName: $error',
               name: 'Scaledrone',
             );
-            room.listener.onRoomOpenFailure(room, error);
+            room.onOpenFailure?.call(room, error);
           } else {
-            room.listener.onRoomOpen(room);
+            room.onOpen?.call(room);
           }
         }),
       };

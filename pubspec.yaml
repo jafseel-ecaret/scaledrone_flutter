@@ -1,7 +1,7 @@
 name: scaledrone_flutter
 description: A Flutter client for Scaledrone realtime messaging service
-version: 1.0.0
-homepage: https://github.com/yourusername/scaledrone-flutter
+version: 1.0.1
+homepage: https://github.com/jafseel-ecaret/scaledrone_flutter
 
 
 environment:

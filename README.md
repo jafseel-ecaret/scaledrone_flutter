@@ -19,6 +19,37 @@ An **unofficial** Flutter client library for [Scaledrone](https://www.scaledrone
 - 🎯 **Comprehensive error handling** and event callbacks
 - 🌐 **Cross-platform support** (iOS, Android, Web, Desktop)
 - 🛡️ **Type-safe** models and listeners
+- ⚡ **Modern callback-based API** for flexibility and ease of use
+
+## API Design
+
+This package uses a **modern callback-based API** instead of traditional abstract class listeners, providing several benefits:
+
+### Callback-Based Benefits
+- ✅ **More Flexible**: Use any function (static, instance, anonymous)
+- ✅ **Optional Callbacks**: Only implement the events you need
+- ✅ **Cleaner Code**: No need to create classes that implement interfaces
+- ✅ **Better IDE Support**: Superior autocomplete and error messages
+- ✅ **Flutter Best Practices**: Follows modern Dart/Flutter patterns
+- ✅ **Easier Testing**: Simple to mock individual functions vs entire interfaces
+
+### Before vs After
+```dart
+// Old approach (abstract classes) - more verbose
+class MyListener implements ConnectionListener, RoomListener {
+  @override void onOpen() { /* implement */ }
+  @override void onOpenFailure(Exception ex) { /* implement */ }
+  // ... must implement all methods
+}
+scaledrone.connect(myListener);
+
+// New approach (callbacks) - more flexible
+scaledrone.connect(
+  onOpen: () => print('Connected!'),
+  onOpenFailure: (ex) => print('Failed: $ex'),
+  // ... only provide callbacks you need
+);
+```
 
 ## Installation
 
@@ -62,7 +93,7 @@ class MyApp extends StatefulWidget {
   _MyAppState createState() => _MyAppState();
 }
 
-class _MyAppState extends State<MyApp> implements ConnectionListener, RoomListener {
+class _MyAppState extends State<MyApp> {
   late Scaledrone scaledrone;
   Room? chatRoom;
   List<String> messages = [];
@@ -81,46 +112,49 @@ class _MyAppState extends State<MyApp> implements ConnectionListener, RoomListen
       ),
     );
     
-    // Connect to Scaledrone
-    scaledrone.connect(this);
+    // Connect to Scaledrone with callback functions
+    scaledrone.connect(
+      onOpen: _onConnectionOpen,
+      onOpenFailure: _onConnectionFailed,
+      onFailure: _onConnectionError,
+      onClosed: _onConnectionClosed,
+    );
   }
 
-  // Connection Listener Methods
-  @override
-  void onOpen() {
+  // Connection callback methods
+  void _onConnectionOpen() {
     print('🟢 Connected to Scaledrone!');
     // Subscribe to a room once connected
-    chatRoom = scaledrone.subscribe('my-chat-room', this);
+    chatRoom = scaledrone.subscribe(
+      'my-chat-room',
+      onOpen: _onRoomOpen,
+      onOpenFailure: _onRoomOpenFailure, 
+      onMessage: _onRoomMessage,
+    );
   }
 
-  @override
-  void onOpenFailure(Exception ex) {
+  void _onConnectionFailed(Exception ex) {
     print('🔴 Connection failed: $ex');
   }
 
-  @override
-  void onFailure(Exception ex) {
+  void _onConnectionError(Exception ex) {
     print('⚠️ Connection error (reconnecting...): $ex');
   }
 
-  @override
-  void onClosed(String reason) {
+  void _onConnectionClosed(String reason) {
     print('🔴 Connection closed: $reason');
   }
 
-  // Room Listener Methods
-  @override
-  void onOpen(Room room) {
+  // Room callback methods
+  void _onRoomOpen(Room room) {
     print('🏠 Joined room: ${room.name}');
   }
 
-  @override
-  void onOpenFailure(Room room, Exception ex) {
+  void _onRoomOpenFailure(Room room, Exception ex) {
     print('🔴 Failed to join room: $ex');
   }
 
-  @override
-  void onMessage(Room room, Message message) {
+  void _onRoomMessage(Room room, Message message) {
     setState(() {
       messages.add(message.data.toString());
     });
@@ -128,7 +162,10 @@ class _MyAppState extends State<MyApp> implements ConnectionListener, RoomListen
   }
 
   void sendMessage(String text) {
-    scaledrone.publish('my-chat-room', {'text': text, 'timestamp': DateTime.now().toIso8601String()});
+    scaledrone.publish('my-chat-room', {
+      'text': text, 
+      'timestamp': DateTime.now().toIso8601String()
+    });
   }
 
   @override
@@ -147,15 +184,36 @@ class _MyAppState extends State<MyApp> implements ConnectionListener, RoomListen
 // Subscribe to a room with history
 final room = scaledrone.subscribe(
   'my-room',
-  roomListener,
-  SubscribeOptions(
+  onOpen: (room) => print('Joined ${room.name}'),
+  onMessage: (room, message) => handleMessage(message),
+  options: SubscribeOptions(
     historyCount: 10, // Get last 10 messages
   ),
 );
 
 // Subscribe to an observable room (for member tracking)
-final observableRoom = scaledrone.subscribe('observable-my-room', roomListener);
-observableRoom.setObservableListener(MyObservableListener());
+final observableRoom = scaledrone.subscribe(
+  'observable-my-room',
+  onOpen: (room) => print('Joined observable room'),
+  onMessage: (room, message) => handleMessage(message),
+);
+
+// Set up observable callbacks for member tracking
+observableRoom.setObservableListeners(
+  onMembers: (room, members) {
+    print('💥 Current members in ${room.name}: ${members.length}');
+    for (var member in members) {
+      print('  - ${member.id}: ${member.clientData}');
+    }
+  },
+  onMemberJoin: (room, member) {
+    print('👋 Member joined ${room.name}: ${member.id}');
+    print('   Data: ${member.clientData}');
+  },
+  onMemberLeave: (room, member) {
+    print('👋 Member left ${room.name}: ${member.id}');
+  },
+);
 ```
 
 #### Publishing Messages
@@ -182,77 +240,44 @@ scaledrone.publish('my-room', {'text': 'Hello!'}, (error) {
 });
 ```
 
-#### Observable Rooms (Member Tracking)
 
-```dart
-class MyObservableListener implements ObservableListener {
-  @override
-  void onMembers(Room room, List<Member> members) {
-    print('💥 Current members in ${room.name}: ${members.length}');
-    for (var member in members) {
-      print('  - ${member.id}: ${member.clientData}');
-    }
-  }
-
-  @override
-  void onMemberJoin(Room room, Member member) {
-    print('👋 Member joined ${room.name}: ${member.id}');
-    print('   Data: ${member.clientData}');
-  }
-
-  @override
-  void onMemberLeave(Room room, Member member) {
-    print('👋 Member left ${room.name}: ${member.id}');
-  }
-}
-
-// Subscribe to observable room
-final room = scaledrone.subscribe('observable-my-room', MyRoomListener());
-room.setObservableListener(MyObservableListener());
-```
 
 #### Message History
 
 ```dart
-class MyHistoryListener implements HistoryListener {
-  @override
-  void onHistory(Room room, List<Message> messages) {
-    print('📜 Received ${messages.length} historical messages');
-    for (var message in messages) {
-      print('  ${message.timestamp}: ${message.data}');
-    }
-  }
+// Request message history with callback
+room.setHistoryListener((room, message, index) {
+  print('📜 Historical message ${index}: ${message.data}');
+  print('   Timestamp: ${message.timestamp}');
+});
 
-  @override
-  void onHistoryFailure(Room room, Exception ex) {
-    print('❌ Failed to load history: $ex');
-  }
-}
-
-// Request message history
-room.getHistory(50, MyHistoryListener()); // Get last 50 messages
+// Or handle history in room subscription
+final room = scaledrone.subscribe(
+  'my-room',
+  onOpen: (room) => print('Room opened'),
+  onMessage: (room, message) => print('New message: ${message.data}'),
+  options: SubscribeOptions(
+    historyCount: 50, // Get last 50 messages
+  ),
+);
 ```
 ```
 
 #### Authentication
 
 ```dart
-class MyAuthListener implements AuthenticationListener {
-  @override
-  void onAuthentication() {
+// Authenticate with JWT token using callbacks
+scaledrone.authenticate(
+  'YOUR_JWT_TOKEN',
+  onAuthentication: () {
     print('🔐 Successfully authenticated!');
     // User is now authenticated and can join private rooms
-  }
-
-  @override
-  void onAuthenticationFailure(Exception ex) {
+  },
+  onAuthenticationFailure: (ex) {
     print('🚫 Authentication failed: $ex');
     // Handle authentication failure
-  }
-}
-
-// Authenticate with JWT token
-scaledrone.authenticate('YOUR_JWT_TOKEN', MyAuthListener());
+  },
+);
 ```
 
 #### Custom Client Data
@@ -305,21 +330,23 @@ final scaledrone = Scaledrone(
 #### Handling Reconnection in Your App
 
 ```dart
-class MyConnectionListener implements ConnectionListener {
-  @override
-  void onFailure(Exception ex) {
-    print('🔄 Connection lost, reconnection will be attempted automatically');
-    // Update UI to show reconnecting state
-    setState(() => connectionStatus = 'Reconnecting...');
-  }
-  
-  @override
-  void onOpen() {
+// Handle reconnection events with callbacks
+scaledrone.connect(
+  onOpen: () {
     print('✅ Connected! (This may be after a successful reconnection)');
     // Update UI to show connected state
     setState(() => connectionStatus = 'Connected');
-  }
-}
+  },
+  onFailure: (ex) {
+    print('🔄 Connection lost, reconnection will be attempted automatically');
+    // Update UI to show reconnecting state
+    setState(() => connectionStatus = 'Reconnecting...');
+  },
+  onClosed: (reason) {
+    print('🔴 Connection closed: $reason');
+    setState(() => connectionStatus = 'Disconnected');
+  },
+);
 ```
 
 ## API Reference
@@ -343,10 +370,10 @@ Scaledrone(String channelId, {
 - `ReconnectionOptions reconnectionOptions` - Current reconnection settings
 
 **Methods:**
-- `void connect(ConnectionListener listener)` - Connect to Scaledrone
-- `Room subscribe(String roomName, RoomListener listener, [SubscribeOptions? options])` - Subscribe to a room
+- `void connect({OnOpenCallback? onOpen, OnOpenFailureCallback? onOpenFailure, OnFailureCallback? onFailure, OnClosedCallback? onClosed})` - Connect to Scaledrone with callback functions
+- `Room subscribe(String roomName, {OnRoomOpenCallback? onOpen, OnRoomOpenFailureCallback? onOpenFailure, OnRoomMessageCallback? onMessage, SubscribeOptions? options})` - Subscribe to a room with callback functions
 - `void publish(String roomName, dynamic data, [GenericCallback? callback])` - Publish message to room
-- `void authenticate(String jwt, AuthenticationListener listener)` - Authenticate with JWT
+- `void authenticate(String jwt, {OnAuthenticationCallback? onAuthentication, OnAuthenticationFailureCallback? onAuthenticationFailure})` - Authenticate with JWT using callback functions
 - `void setUrl(String url)` - Set custom WebSocket URL
 - `void close()` - Close connection
 
@@ -358,8 +385,8 @@ Represents a subscribed room.
 - `String id` - Unique room identifier
 
 **Methods:**
-- `void setObservableListener(ObservableListener listener)` - Set member tracking listener
-- `void getHistory(int count, HistoryListener listener)` - Request message history
+- `void setObservableListeners({OnMembersCallback? onMembers, OnMemberJoinCallback? onMemberJoin, OnMemberLeaveCallback? onMemberLeave})` - Set member tracking callbacks
+- `void setHistoryListener(OnHistoryMessageCallback callback)` - Set history message callback
 
 #### `Message`
 Represents a received message.
@@ -381,18 +408,28 @@ Represents a room member.
 ### Error Handling
 
 ```dart
-@override
-void onOpenFailure(Exception ex) {
-  if (ex.toString().contains('authentication')) {
-    // Handle authentication errors
-    print('Authentication required or invalid');
-  } else if (ex.toString().contains('network')) {
-    // Handle network errors
-    print('Network connection failed');
-  } else {
-    // Handle other errors
-    print('Connection failed: $ex');
-  }
+scaledrone.connect(
+  onOpenFailure: (ex) {
+    if (ex.toString().contains('authentication')) {
+      // Handle authentication errors
+      print('Authentication required or invalid');
+    } else if (ex.toString().contains('network')) {
+      // Handle network errors
+      print('Network connection failed');
+    } else {
+      // Handle other errors
+      print('Connection failed: $ex');
+    }
+  },
+  onFailure: (ex) {
+    // Handle connection errors during operation
+    handleError('Connection error', ex);
+  },
+);
+
+void handleError(String context, Exception ex) {
+  // Log error and show user-friendly message
+  developer.log('$context: $ex', name: 'Scaledrone');
 }
 ```
 
@@ -410,24 +447,20 @@ void dispose() {
 
 ### 2. Error Handling
 ```dart
-// Implement all listener methods for robust error handling
-class RobustConnectionListener implements ConnectionListener {
-  @override
-  void onOpen() => print('Connected');
-  
-  @override
-  void onOpenFailure(Exception ex) => handleError('Connection failed', ex);
-  
-  @override
-  void onFailure(Exception ex) => handleError('Connection error', ex);
-  
-  @override
-  void onClosed(String reason) => print('Disconnected: $reason');
-  
-  void handleError(String context, Exception ex) {
-    // Log error and show user-friendly message
-    developer.log('$context: $ex', name: 'Scaledrone');
-  }
+// Implement comprehensive error handling with callbacks
+void connectWithRobustHandling() {
+  scaledrone.connect(
+    onOpen: () => print('Connected'),
+    onOpenFailure: (ex) => handleError('Connection failed', ex),
+    onFailure: (ex) => handleError('Connection error', ex),
+    onClosed: (reason) => print('Disconnected: $reason'),
+  );
+}
+
+void handleError(String context, Exception ex) {
+  // Log error and show user-friendly message
+  developer.log('$context: $ex', name: 'Scaledrone');
+  // Update UI or take corrective action
 }
 ```
 

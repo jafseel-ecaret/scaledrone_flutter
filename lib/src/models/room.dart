@@ -7,25 +7,42 @@ import '../listeners/history_listener.dart';
 
 class Room {
   final String name;
-  final RoomListener listener;
+  final OnRoomOpenCallback? onOpen;
+  final OnRoomOpenFailureCallback? onOpenFailure;
+  final OnRoomMessageCallback? onMessage;
   final dynamic scaledrone; // Using dynamic to avoid circular import
   final SubscribeOptions options;
   final Map<String, Member> members = {};
 
-  ObservableListener? observableListener;
-  HistoryListener? historyListener;
+  OnMembersCallback? onMembers;
+  OnMemberJoinCallback? onMemberJoin;
+  OnMemberLeaveCallback? onMemberLeave;
+  OnHistoryMessageCallback? onHistoryMessage;
 
-  Room(this.name, this.listener, this.scaledrone, this.options);
+  Room({
+    required this.name,
+    this.onOpen,
+    this.onOpenFailure,
+    this.onMessage,
+    required this.scaledrone,
+    required this.options,
+  });
 
-  void setObservableListener(ObservableListener listener) {
-    observableListener = listener;
+  void setObservableListeners({
+    OnMembersCallback? onMembers,
+    OnMemberJoinCallback? onMemberJoin,
+    OnMemberLeaveCallback? onMemberLeave,
+  }) {
+    this.onMembers = onMembers;
+    this.onMemberJoin = onMemberJoin;
+    this.onMemberLeave = onMemberLeave;
   }
 
-  void setHistoryListener(HistoryListener listener) {
-    historyListener = listener;
+  void setHistoryListener(OnHistoryMessageCallback callback) {
+    onHistoryMessage = callback;
   }
 
   void handleHistoryMessage(Message message, int? index) {
-    historyListener?.onHistoryMessage(this, message, index);
+    onHistoryMessage?.call(this, message, index);
   }
 }

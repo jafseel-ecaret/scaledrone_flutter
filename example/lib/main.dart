@@ -21,8 +21,7 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen>
-    implements ConnectionListener, RoomListener {
+class _ChatScreenState extends State<ChatScreen> {
   late Scaledrone scaledrone;
   Room? room;
   final List<Message> messages = [];
@@ -57,21 +56,29 @@ class _ChatScreenState extends State<ChatScreen>
       reconnectionOptions: reconnectionOptions,
     );
 
-    scaledrone.connect(this);
+    scaledrone.connect(
+      onOpen: _onOpen,
+      onOpenFailure: _onOpenFailure,
+      onFailure: _onFailure,
+      onClosed: _onClosed,
+    );
   }
 
-  @override
-  void onOpen() {
+  void _onOpen() {
     print('Connected to Scaledrone');
     setState(() {
       _connectionStatus = 'Connected';
       _statusColor = Colors.green;
     });
-    room = scaledrone.subscribe(_roomName, this);
+    room = scaledrone.subscribe(
+      _roomName,
+      onOpen: _onRoomOpen,
+      onOpenFailure: _onRoomOpenFailure,
+      onMessage: _onRoomMessage,
+    );
   }
 
-  @override
-  void onOpenFailure(Exception ex) {
+  void _onOpenFailure(Exception ex) {
     print('Failed to connect: $ex');
     setState(() {
       _connectionStatus = 'Connection Failed';
@@ -79,8 +86,7 @@ class _ChatScreenState extends State<ChatScreen>
     });
   }
 
-  @override
-  void onFailure(Exception ex) {
+  void _onFailure(Exception ex) {
     print('Connection failure: $ex');
     setState(() {
       _connectionStatus = 'Reconnecting...';
@@ -88,8 +94,7 @@ class _ChatScreenState extends State<ChatScreen>
     });
   }
 
-  @override
-  void onClosed(String reason) {
+  void _onClosed(String reason) {
     print('Connection closed: $reason');
     setState(() {
       _connectionStatus = 'Disconnected';
@@ -97,18 +102,15 @@ class _ChatScreenState extends State<ChatScreen>
     });
   }
 
-  @override
-  void onRoomOpen(Room room) {
+  void _onRoomOpen(Room room) {
     print('Subscribed to room: ${room.name}');
   }
 
-  @override
-  void onRoomOpenFailure(Room room, Exception ex) {
+  void _onRoomOpenFailure(Room room, Exception ex) {
     print('Failed to subscribe: $ex');
   }
 
-  @override
-  void onRoomMessage(Room room, Message message) {
+  void _onRoomMessage(Room room, Message message) {
     print('Received message in room ${room.name}: ${message.data}');
     setState(() {
       messages.add(message);

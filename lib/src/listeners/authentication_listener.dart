@@ -1,4 +1,3 @@
-abstract class AuthenticationListener {
-  void onAuthentication();
-  void onAuthenticationFailure(Exception ex);
-}
+// Authentication callbacks
+typedef OnAuthenticationCallback = void Function();
+typedef OnAuthenticationFailureCallback = void Function(Exception ex);
